@@ -24,7 +24,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
     <div style={{ width: "100%", marginBottom: 20 }}>
       {label && (
         <div style={{ fontSize: 24, color: "#d1d5db", marginBottom: 10,
-          fontFamily: '"Noto Serif SC", serif' }}>{label}</div>
+          fontFamily: '"Songti SC", "STSong", "Noto Serif SC", serif' }}>{label}</div>
       )}
       <div style={{ width: "100%", height, backgroundColor: bgColor,
         borderRadius: height / 2, overflow: "hidden" }}>

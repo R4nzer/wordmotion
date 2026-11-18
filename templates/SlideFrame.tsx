@@ -46,7 +46,7 @@ export const SlideFrame: React.FC<SlideFrameProps> = ({
         opacity,
         backgroundColor: "#0a0a0f",
         color: "#e5e7eb",
-        fontFamily: '"Noto Serif SC", serif',
+        fontFamily: '"Songti SC", "STSong", "Noto Serif SC", serif',
         position: "relative",
         overflow: "hidden",
       }}

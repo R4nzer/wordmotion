@@ -57,7 +57,7 @@ export const BarChart: React.FC<BarChartProps> = ({
                 textAlign: "right",
                 fontSize: 18,
                 color: "#d1d5db",
-                fontFamily: '"Noto Serif SC", serif',
+                fontFamily: '"Songti SC", "STSong", "Noto Serif SC", serif',
                 flexShrink: 0,
               }}
             >

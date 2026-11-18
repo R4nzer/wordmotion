@@ -10,6 +10,9 @@ description: |
 
   Also trigger for: video essay, text-to-video, "turn my article into a video",
   "make a slideshow from this post", blog-to-video pipeline.
+
+  Chinese triggers: 把文章做成视频、把这篇文章做成视频、给文章配音、加旁白、
+  做成讲解视频、文章转视频、生成动态幻灯片视频。
 ---
 
 # Wordmotion
@@ -19,7 +22,7 @@ Turn a blog post or essay (`.md`) into a Remotion video. This skill covers pipel
 ## Pipeline Phases (follow in order)
 
 ```
-0. Video Type Detection → 1. Audio Generation → 2. Data Generation → 3. Infrastructure → 4. Slide Design → 5. Assembly → 6. Render
+0. Video Type Detection → 1. Audio Generation → 2. Data Generation → 3. Infrastructure → 4. Slide Design → 5. Assembly → 6. Render → 7. Verify
 ```
 
 ---
@@ -45,6 +48,16 @@ Ask the user only when the signals genuinely split between two types. Otherwise 
 ### Tool
 `edge-tts` CLI (Python). Ask the user which voice and playback speed they want. If they haven't decided, suggest they browse available voices with `edge-tts --list-voices` and pick one that matches the text's language and the tone they're going for.
 
+### When edge-tts is blocked (fallback ladder)
+
+edge-tts goes through a Microsoft WebSocket endpoint and does get blocked — observed `WSServerHandshakeError: 403, Invalid response status` on every request while `--list-voices` still worked fine. **Synthesize one sentence and check its duration before looping the batch**, otherwise a whole pass produces 0-byte files.
+
+Fallback order:
+
+1. **Local Kokoro TTS** (`hexgrad/Kokoro-82M`, ~320MB). For Chinese, `zm_yunxi` is a young male voice close to Edge's `Yunxi`. Two traps: when `huggingface.co` is unreachable, fetch `config.json` / `kokoro-v1_0.pth` / `voices/*.pt` from `https://hf-mirror.com/hexgrad/Kokoro-82M/resolve/main/<file>` and monkeypatch `hf_hub_download` in both `kokoro.model` and `kokoro.pipeline` to return the local path; and on `huggingface_hub` 2.x the default download path dies with `process() takes no keyword arguments`, so that patch is not optional.
+2. **macOS `say`.** `Tingting` / `Meijia` produce usable Chinese. `Eddy` / `Reed` / `Rocko` accept `-v` and then emit a ~0.016s empty file — check the first clip's duration, never trust exit code 0.
+3. Whatever the engine, **record** `engine` and `voice` in `manifest.json`, so a later partial re-run cannot silently mix two voices.
+
 ### Sentence splitting
 Split source `.md` at sentence-ending punctuation (`.`, `!`, `?`, `。`, `！`, `？` — adapt to the text's language). Filter out empty strings and lone punctuation artifacts from quote splitting.
 
@@ -55,8 +68,8 @@ edge-tts --voice "<voice>" --rate="<rate>" --text "sentence text" --write-media 
 ```
 Use the template in `scripts/generate-audio.mjs` — it accepts the source file path and voice/rate as arguments.
 
-- Output: `public/audio/s_XXX.mp3` (zero-padded, sequential)
-- Generate `public/audio/manifest.json`: `[{ index, id, filename, text, charCount }]`
+- Output: `public/audio/s_XXX.mp3` (zero-padded, sequential). Kokoro writes `.wav` — pick one extension and keep the manifest, the `staticFile()` call and `afinfo` consistent with it
+- Generate `public/audio/manifest.json`: `[{ index, id, filename, text, charCount, engine, voice }]`
 
 ### Handle failures
 - Empty-text sentences produce 0-byte files — delete them
@@ -67,7 +80,12 @@ Use the template in `scripts/generate-audio.mjs` — it accepts the source file 
 ## Phase 2: Data Generation
 
 ### Measure audio durations
-Use `afinfo` (macOS) or `ffprobe` (Linux) on each file.
+
+Use `afinfo` on macOS (ships with the OS) and `ffprobe` on Linux. **Do not assume ffmpeg exists.** A stock macOS has no system ffmpeg, and the copy bundled in `node_modules/@remotion/compositor-*/` is a minimal build — it has `scale` / `atempo` / `crop`, but no `setpts`, no `fps`, no `volumedetect`, and on macOS it only runs with `DYLD_LIBRARY_PATH` pointing at its own directory. Use it for cutting and single-frame grabs; anything else needs a real build:
+
+```bash
+python3 -m venv /tmp/ffenv && /tmp/ffenv/bin/pip install imageio-ffmpeg
+```
 
 ### Generate `src/data/captions.json`
 Walk sentences in order, accumulating `currentMs += durationMs`:
@@ -89,10 +107,10 @@ Group sentences into **15-25 shots**. Each shot maps to one slide. Attributes: `
 - Resolution and fps: ask the user. Common defaults are `1920×1080` at 30fps for landscape (YouTube/Bilibili) or `1080×1920` for vertical (TikTok/Shorts).
 - `Root.tsx`: import shots.json, sum `durationFrames` for total, pass to Composition (no calculateMetadata needed)
 - `tsconfig.json`: ensure `resolveJsonModule: true`
-- Dependencies: `@remotion/media`, `@remotion/captions`
-- Font: a serif font matching the text's language (Google Fonts)
+- Dependencies: `remotion` and `@remotion/cli` only. `Audio` and `staticFile` come from core, and the caption type can live in `src/types.ts` — `@remotion/media` and `@remotion/captions` are not required
+- Font: a serif font matching the text's language. Prefer a system font so rendering never depends on the network — Chinese: `"Songti SC", "STSong", "Noto Serif SC", serif`
 
-### Shared components (template code in `assets/templates/`)
+### Shared components (template code in this skill's `templates/`)
 Copy these into `src/components/shared/`:
 
 | File | Role |
@@ -187,7 +205,7 @@ For every shot in `shots.json`:
 
 4. **Read, don't guess.** When a card matches, read the recipe card `.md` in full and the exact demo source its "参考实现" points to. The demo holds the tuned truth — easing, timing, pitfalls. Re-writing from the card name alone throws away all of that tuning. Cards mark "已知坑/命门" parameters: never downgrade them.
 5. **Adapt, don't copy verbatim.** Port the card through `templates/card-adaptation.md` before it enters the slide.
-6. **Record usage.** Append every card used to `src/data/cards-used.json`: `{ shotId, library, category, card, demoSource, attributionNote }`. Keep the library's ATTRIBUTION notice intact.
+6. **Record usage.** Append every card used to `src/data/cards-used.json`: `{ shotId, library, category, card, demoSource, attributionNote }`. Keep the library's ATTRIBUTION notice intact. If that file ends up empty while a library *is* installed, state it explicitly in the final report — hand-rolling every slide is a legitimate choice, but it has to be a stated one, not a silent omission.
 7. **No match → fallback.** If no card fits, use a baseline pattern. Never force a card that fights the audio.
 
 **Card adaptation rules (summary — full checklist in `templates/card-adaptation.md`)**
@@ -215,11 +233,19 @@ const shotPositions = useMemo(() => {
 ```
 
 ### Audio per shot
-Each shot plays its sentence audio files in order, offset by their relative start times within the shot:
+Each shot plays its sentence audio files in order, offset by their relative start times within the shot. **Resolve the shot's own captions first.** Indexing the global `captions` array with the shot-local `i` is the most common source of drift, and it only shows up from the second shot onward — the first shot looks perfect:
+
 ```tsx
+// Before rendering the sequence:
+const shotCaptions = shot.captionIndices.map((index) => captions[index]);
+const firstStart = shotCaptions[0]?.startMs ?? 0;
+
 // Inside each shot's Sequence:
-audioFiles.map((file, i) => (
-  <Sequence from={Math.round((captions[i].startMs - captions[0].startMs) / 1000 * fps)}>
+shot.audioFiles.map((file, index) => (
+  <Sequence
+    key={file}
+    from={Math.round(((shotCaptions[index].startMs - firstStart) / 1000) * fps)}
+  >
     <Audio src={staticFile(`audio/${file}`)} />
   </Sequence>
 ))
@@ -231,6 +257,7 @@ Render `<Subtitles captions={allCaptions} />` OUTSIDE all shot Sequences. The Su
 - Finds active caption by `currentTimeMs >= startMs && currentTimeMs < endMs`
 - Splits text into characters, highlights `progress * length` characters in gold
 - Font: 44px serif, bottom 72px, z-index 100
+- **Scale the font down on long sentences.** CJK sentences run long, and 44px wraps to four rows inside a 1700px box, pushing the first row up into the slide. Use `>90` chars → 32px, `>60` chars → 38px, otherwise 44px. `templates/Subtitles.tsx` ships `subtitleFontSize(text)`
 
 Full structure:
 ```tsx
@@ -250,8 +277,34 @@ Full structure:
 ## Phase 6: Render
 
 ```bash
-npx remotion render <CompositionId> out/output.mp4
+./node_modules/.bin/remotion render src/index.ts <CompositionId> out/output.mp4 --codec=h264 --crf=18
 ```
+
+The entry file is required when there is no `remotion.config.ts` pointing at one, and `--codec=h264` avoids the default ProRes output. For a single-slide fix do not re-render 30k frames — `--frames=<start>-<end>` renders just that slice.
+
+---
+
+## Phase 7: Verify
+
+"Render exited 0" is not evidence. Check, in order:
+
+1. **Duration** matches `sum(durationFrames) / fps` to within a frame. On macOS without ffmpeg: `mdls -name kMDItemDurationSeconds -name kMDItemPixelWidth -name kMDItemPixelHeight out/output.mp4`; elsewhere `ffprobe`.
+2. **Audio is actually present.** Run `volumedetect` with a full ffmpeg build (the Remotion one does not have it): a mean near `-90 dB` means the `Audio` sequences never fired. A working narration track lands around `-28 dB` mean, `-5 dB` peak.
+3. **Look at frames, one per layout family.** Subtitle overflow, clipped bottom rows and empty slides are all invisible in the log. The Remotion-bundled ffmpeg can grab stills: `-ss <t> -i out/output.mp4 -frames:v 1 frame.png`.
+4. **Sync spot check.** Grab the frame at a shot boundary and read the caption — it must match the sentence being spoken there. Drift is cumulative, so one bad offset early makes the entire tail wrong.
+
+## Post-production
+
+A global speed change (e.g. the user asks for 1.5×) does not need a re-render. Stretch the finished file — subtitles are burned in, so the whole timeline scales together and sync is preserved exactly:
+
+```bash
+ffmpeg -i out/output.mp4 \
+  -filter_complex "[0:v]setpts=PTS/<rate>,fps=30[v];[0:a]atempo=<rate>[a]" \
+  -map "[v]" -map "[a]" -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p \
+  -c:a aac -b:a 192k -movflags +faststart out/output-<rate>x.mp4
+```
+
+`atempo` preserves pitch, so the voice speeds up without becoming a chipmunk. The frame drop from `fps=` is invisible on slides, which are static most of the time.
 
 ---
 
@@ -267,3 +320,7 @@ npx remotion render <CompositionId> out/output.mp4
 | Duplicate sentences in audio | Files not renumbered after deleting bogus entries | Rename remaining files sequentially after cleanup |
 | Imported card feels dead or off-brand | Card copied verbatim with its light-theme skin | Re-skin via `templates/card-adaptation.md`; keep motion grammar only |
 | Imported card breaks audio sync | Card uses overlapping transitions or its own clock | Absolute-frame `<Sequence>`; map card time onto `shot.durationFrames` |
+| Audio drifts from shot 2 onward | Shot-local `audioFiles` index used against the global `captions` array | Resolve `shot.captionIndices` into `shotCaptions` first, offset against `shotCaptions[0]` |
+| Whole TTS batch is silent / 0 bytes | edge-tts endpoint returns 403 | Test one sentence first; fall back to local Kokoro, then macOS `say` |
+| Subtitle row overlaps slide content | Fixed 44px on a long CJK sentence | `subtitleFontSize()` — 32px past 90 chars, 38px past 60 |
+| `setpts` / `fps` / `volumedetect` "No such filter" | Using the ffmpeg bundled with Remotion | Install a full build (`imageio-ffmpeg` in a venv) for anything beyond cutting |

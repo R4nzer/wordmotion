@@ -1,12 +1,40 @@
 import React from "react";
 import { useCurrentFrame, useVideoConfig, AbsoluteFill } from "remotion";
-import type { Caption } from "@remotion/captions";
+
+/**
+ * Local caption shape — intentionally not imported from `@remotion/captions`
+ * so the project needs no extra dependency. `build-data` writes exactly these
+ * fields into `src/data/captions.json`.
+ */
+export interface Caption {
+  text: string;
+  startMs: number;
+  endMs: number;
+  sentenceIndex?: number;
+  audioFile?: string;
+  charCount?: number;
+}
 
 interface SubtitlesProps {
   captions: Caption[];
 }
 
 const HIGHLIGHT_COLOR = "#f59e0b";
+const IDLE_COLOR = "#e5e7eb";
+const FADED_COLOR = "#6b7280";
+const FONT_STACK = '"Songti SC", "STSong", "Noto Serif SC", serif';
+
+/**
+ * CJK sentences run long. At a fixed 44px a 100-character sentence wraps to
+ * four rows inside a 1700px box and the first row collides with the slide
+ * content above, so step the size down with length.
+ */
+export const subtitleFontSize = (text: string): number => {
+  const length = [...text].length;
+  if (length > 90) return 32;
+  if (length > 60) return 38;
+  return 44;
+};
 
 /**
  * Simple subtitle component for Chinese text.
@@ -35,17 +63,15 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ captions }) => {
     return (
       <AbsoluteFill style={{ justifyContent: "flex-end", alignItems: "center",
         paddingBottom: 72, pointerEvents: "none", zIndex: 100 }}>
-        <div style={{ fontSize: 44, fontWeight: 600, textAlign: "center",
-          lineHeight: 1.5, fontFamily: '"Noto Serif SC", serif',
+        <div style={{ fontSize: subtitleFontSize(caption.text), fontWeight: 600,
+          textAlign: "center", lineHeight: 1.5, fontFamily: FONT_STACK,
           textShadow: "0 3px 12px rgba(0,0,0,0.9)",
-          maxWidth: 1700, padding: "0 60px", color: "#6b7280", opacity: 0.5 }}>
+          maxWidth: 1700, padding: "0 60px", color: FADED_COLOR, opacity: 0.5 }}>
           {caption.text}
         </div>
       </AbsoluteFill>
     );
   }
-
-  if (activeIndex === -1) return null;
 
   const caption = captions[activeIndex];
   const sentenceDuration = caption.endMs - caption.startMs;
@@ -69,11 +95,11 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ captions }) => {
     >
       <div
         style={{
-          fontSize: 44,
+          fontSize: subtitleFontSize(caption.text),
           fontWeight: 600,
           textAlign: "center",
           lineHeight: 1.5,
-          fontFamily: '"Noto Serif SC", serif',
+          fontFamily: FONT_STACK,
           textShadow: "0 3px 12px rgba(0,0,0,0.9)",
           maxWidth: 1700,
           padding: "0 60px",
@@ -83,7 +109,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ captions }) => {
           <span
             key={i}
             style={{
-              color: i < highlightCount ? HIGHLIGHT_COLOR : "#e5e7eb",
+              color: i < highlightCount ? HIGHLIGHT_COLOR : IDLE_COLOR,
               transition: "none",
             }}
           >

@@ -32,7 +32,7 @@ export const ComparisonTable: React.FC<ComparisonTableProps> = ({
   const renderColumn = (col: Column, opacity: number) => (
     <div style={{ flex: 1, opacity }}>
       <div style={{ fontSize: 32, fontWeight: 700, color: col.titleColor || "#f59e0b",
-        marginBottom: 24, textAlign: "center", fontFamily: '"Noto Serif SC", serif' }}>
+        marginBottom: 24, textAlign: "center", fontFamily: '"Songti SC", "STSong", "Noto Serif SC", serif' }}>
         {col.title}
       </div>
       {col.items.map((item, i) => {
@@ -41,7 +41,7 @@ export const ComparisonTable: React.FC<ComparisonTableProps> = ({
           <div key={i} style={{ padding: "18px 24px", marginBottom: 12,
             backgroundColor: "#111827", borderRadius: 12, border: "1.5px solid #1f2937",
             fontSize: 24, color: s.text, display: "flex", alignItems: "center", gap: 14,
-            fontFamily: '"Noto Serif SC", serif' }}>
+            fontFamily: '"Songti SC", "STSong", "Noto Serif SC", serif' }}>
             <span style={{ fontWeight: 700, fontSize: 22 }}>{s.icon}</span>
             <div>
               <div style={{ lineHeight: 1.4 }}>{item.text}</div>
